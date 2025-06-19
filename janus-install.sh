@@ -1,72 +1,74 @@
 #!/bin/bash
-
-# Janus Linux Installer
-# Author: Riain-stack
-# Target: Arch-based hacking & AI-augmented distro
-
 set -e
 
-USERNAME=janus
-HOSTNAME=janus-linux
+# Janus Linux Installer Script
+# Assumes root partition is mounted at /mnt
 
-# Ensure script is run with root privileges
-if [[ $EUID -ne 0 ]]; then
-  echo "❌ Run this as root or with sudo."
-  exit 1
-fi
-
-echo "🔧 Starting Janus Linux installation..."
-
-# Set time
-timedatectl set-ntp true
-
-# Mount (assumes /mnt is ready)
-read -p "Have you partitioned and mounted your root partition at /mnt? [y/N] " answer
-[[ "$answer" != "y" ]] && echo "❌ Please partition and mount first." && exit 1
-
-# Base system
-pacstrap /mnt base base-devel linux linux-firmware git zsh sudo networkmanager
-
-# Fstab
-genfstab -U /mnt >> /mnt/etc/fstab
-
-# Enter chroot
-arch-chroot /mnt /bin/bash <<EOF
-
-echo "🌐 Configuring locale and hostname..."
-ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+echo "[+] Setting timezone, locale, and base packages..."
+ln -sf /usr/share/zoneinfo/Region/City /etc/localtime
 hwclock --systohc
 echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
 locale-gen
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
-echo "$HOSTNAME" > /etc/hostname
 
-echo "👤 Creating user..."
-useradd -m -G wheel -s /bin/zsh $USERNAME
-echo "$USERNAME:janus" | chpasswd
-echo "root:janus" | chpasswd
-echo "%wheel ALL=(ALL:ALL) ALL" >> /etc/sudoers
+read -p "Enter hostname: " hostname
+echo "$hostname" > /etc/hostname
 
-echo "🚀 Enabling services..."
+echo "[+] Installing base system..."
+pacstrap /mnt base linux linux-firmware vim git sudo networkmanager zsh
+
+echo "[+] Generating fstab..."
+genfstab -U /mnt >> /mnt/etc/fstab
+
+arch-chroot /mnt /bin/bash <<EOF
+echo "[+] Inside chroot environment..."
+
+# Time & Locale
+ln -sf /usr/share/zoneinfo/Region/City /etc/localtime
+hwclock --systohc
+echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
+locale-gen
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
+
+echo "[+] Setting hostname and hosts..."
+echo "$hostname" > /etc/hostname
+echo "127.0.0.1 localhost" >> /etc/hosts
+echo "::1       localhost" >> /etc/hosts
+echo "127.0.1.1 $hostname.localdomain $hostname" >> /etc/hosts
+
+echo "[+] Setting root password..."
+passwd
+
+echo "[+] Creating user 'janus'..."
+useradd -m -G wheel -s /bin/zsh janus
+passwd janus
+echo "%wheel ALL=(ALL) ALL" >> /etc/sudoers
+
+echo "[+] Enabling NetworkManager..."
 systemctl enable NetworkManager
 
-echo "🎛 Installing graphical stack..."
-pacman -S --noconfirm hyprland waybar kitty rofi thunar neovim wl-clipboard xdg-desktop-portal-hyprland
+echo "[+] Installing Hyprland and GUI packages..."
+pacman -S --noconfirm xdg-desktop-portal-hyprland hyprland waybar kitty neovim firefox unzip
 
-echo "🔐 Installing hacking tools..."
-pacman -S --noconfirm nmap wireshark-qt aircrack-ng metasploit bettercap john hashcat nikto gobuster
+echo "[+] Installing TerminalGPT (OpenAI CLI wrapper)..."
+pip install openai
+echo "alias gpt='python3 -m openai chat'" >> /home/janus/.zshrc
 
-echo "🧠 Installing TerminalGPT..."
-pacman -S --noconfirm python-pip
-pip install terminalgpt
+echo "[+] Cloning dotfiles..."
+sudo -u janus git clone https://github.com/Riain-stack/janus-dotfiles /home/janus/.janus-dotfiles
+cp -r /home/janus/.janus-dotfiles/.config /home/janus/.config
+cp /home/janus/.janus-dotfiles/.zshrc /home/janus/.zshrc
+chown -R janus:janus /home/janus
 
-echo "📁 Fetching dotfiles..."
-cd /home/$USERNAME
-git clone https://github.com/Riain-stack/janus-dotfiles.git
-cp -r janus-dotfiles/.config .config
-cp janus-dotfiles/.zshrc .
-chown -R $USERNAME:$USERNAME .config .zshrc janus-dotfiles
+echo "[+] Installing pentesting tools..."
+pacman -S --noconfirm nmap metasploit wireshark-qt aircrack-ng john
 
+echo "[+] Installing GRUB bootloader..."
+pacman -S --noconfirm grub efibootmgr
+grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+grub-mkconfig -o /boot/grub/grub.cfg
+
+echo "[+] Done inside chroot."
 EOF
 
-echo "✅ Installation complete! Reboot, login as '$USERNAME' (password: janus), and enjoy Janus Linux."
+echo "[✓] Janus Linux installed! Reboot after removing installation media."
